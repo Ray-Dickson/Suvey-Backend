@@ -1,48 +1,48 @@
 const { createSurvey } = require('../models/surveyModel');
 const db = require('../config/db');
 
-const handleCreateSurvey = async (req, res) => {
-    const {
-        title,
-        description,
-        is_public,
-        allow_multiple_submissions,
-        requires_login,
-        access_password,
-        open_at,
-        close_at,
-        status
-    } = req.body;
+// const handleCreateSurvey = async (req, res) => {
+//     const {
+//         title,
+//         description,
+//         is_public,
+//         allow_multiple_submissions,
+//         requires_login,
+//         access_password,
+//         open_at,
+//         close_at,
+//         status
+//     } = req.body;
 
-    const user_id = req.user.id;
+//     const user_id = req.user.id;
 
-    if (!title) {
-        return res.status(400).json({ message: 'Title is required' });
-    }
+//     if (!title) {
+//         return res.status(400).json({ message: 'Title is required' });
+//     }
 
-    try {
-        const surveyId = await createSurvey({
-            user_id,
-            title,
-            description,
-            is_public,
-            allow_multiple_submissions,
-            requires_login,
-            access_password,
-            open_at,
-            close_at,
-            status
-        });
+//     try {
+//         const surveyId = await createSurvey({
+//             user_id,
+//             title,
+//             description,
+//             is_public,
+//             allow_multiple_submissions,
+//             requires_login,
+//             access_password,
+//             open_at,
+//             close_at,
+//             status
+//         });
 
-        res.status(201).json({
-            message: 'Survey created successfully',
-            surveyId
-        });
-    } catch (error) {
-        console.error('Error creating survey:', error.message);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
+//         res.status(201).json({
+//             message: 'Survey created successfully',
+//             surveyId
+//         });
+//     } catch (error) {
+//         console.error('Error creating survey:', error.message);
+//         res.status(500).json({ message: 'Server error' });
+//     }
+// };
 
 
 const updateSurvey = async (req, res) => {
@@ -132,10 +132,103 @@ const updateSurvey = async (req, res) => {
       res.status(500).json({ message: 'Server error' });
     }
   };
+
+
+  // Route: POST /api/surveys/create
+const handleCreateSurveyWithQuestions = async (req, res) => {
+    const {
+        title,
+        description,
+        is_public,
+        allow_multiple_submissions,
+        requires_login,
+        access_password,
+        open_at,
+        close_at,
+        status,
+        questions = [] // Array of questions
+    } = req.body;
+
+    const user_id = req.user.id;
+
+    if (!title || questions.length === 0) {
+        return res.status(400).json({ message: 'Title and at least one question are required' });
+    }
+
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Insert survey
+        const [surveyResult] = await connection.query(
+            `INSERT INTO surveys 
+             (user_id, title, description, is_public, allow_multiple_submissions, requires_login, access_password, open_at, close_at, status) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                user_id,
+                title,
+                description,
+                is_public,
+                allow_multiple_submissions,
+                requires_login,
+                access_password,
+                open_at,
+                close_at,
+                status
+            ]
+        );
+
+        const surveyId = surveyResult.insertId;
+
+        // 2. Insert questions and options
+        for (const [index, question] of questions.entries()) {
+            const {
+                question_text,
+                type,
+                is_required = true,
+                options = []
+            } = question;
+
+            const [questionResult] = await connection.query(
+                `INSERT INTO questions (survey_id, question_text, type, is_required, display_order)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [surveyId, question_text, type, is_required, index + 1]
+            );
+
+            const questionId = questionResult.insertId;
+
+            if (['multiple_choice', 'checkbox', 'dropdown'].includes(type)) {
+                for (let i = 0; i < options.length; i++) {
+                    const optionText = options[i];
+                    await connection.query(
+                        `INSERT INTO question_options (question_id, option_text, display_order)
+                         VALUES (?, ?, ?)`,
+                        [questionId, optionText, i + 1]
+                    );
+                }
+            }
+        }
+
+        await connection.commit();
+
+        res.status(201).json({
+            message: 'Survey and questions created successfully',
+            surveyId
+        });
+    } catch (error) {
+        await connection.rollback();
+        console.error('Error creating survey with questions:', error.message);
+        res.status(500).json({ message: 'Server error while creating survey and questions' });
+    } finally {
+        connection.release();
+    }
+};
+
   
 
 module.exports = {
-    handleCreateSurvey,
+    handleCreateSurveyWithQuestions,
+   // handleCreateSurvey,
     updateSurvey,
     deleteSurvey,
     getSurveysByUser,
