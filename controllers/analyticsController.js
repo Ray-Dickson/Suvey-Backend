@@ -7,9 +7,9 @@ const getSurveyAnalytics = async (req, res) => {
   const userRole = req.user.role;
 
   try {
-    // Step 1: Check if survey exists and get owner
+    // Step 1: Get survey details including title and creation date
     const [[survey]] = await db.query(
-      'SELECT user_id FROM surveys WHERE id = ?',
+      'SELECT id, title, description, user_id, created_at FROM surveys WHERE id = ?',
       [surveyId]
     );
 
@@ -27,61 +27,69 @@ const getSurveyAnalytics = async (req, res) => {
       });
     }
 
-    // Step 3: Total responses
-    const [[{ totalResponses }]] = await db.query(
-      'SELECT COUNT(*) AS totalResponses FROM responses WHERE survey_id = ?',
+    // Step 3: Get all responses with submission dates
+    const [responses] = await db.query(
+      'SELECT id, submitted_at FROM responses WHERE survey_id = ? ORDER BY submitted_at',
       [surveyId]
     );
 
-    // Step 4: Get all questions in this survey
+    // Step 4: Get all questions in this survey with options
     const [questions] = await db.query(
-      'SELECT id, question_text, type FROM questions WHERE survey_id = ?',
+      `SELECT 
+        q.id, 
+        q.question_text as text, 
+        q.type, 
+        q.is_required as required,
+        GROUP_CONCAT(o.option_text) as option_texts
+      FROM questions q
+      LEFT JOIN question_options o ON o.question_id = q.id
+      WHERE q.survey_id = ?
+      GROUP BY q.id`,
       [surveyId]
     );
 
-    // Step 5: Build analytics per question
-    const analytics = [];
+    // Step 5: Get all answers for these questions
+    const [answers] = await db.query(
+      `SELECT 
+        question_id,
+        response_id,
+        answer_text
+      FROM answers
+      WHERE question_id IN (?)`,
+      [questions.map(q => q.id)]
+    );
 
-    for (const q of questions) {
-      const questionData = {
-        question_text: q.question_text,
-        type: q.type,
-      };
+    // Step 6: Format questions with options
+    const formattedQuestions = questions.map(q => ({
+      id: q.id,
+      text: q.question_text,
+      type: mapQuestionType(q.type), // Map to frontend types
+      required: q.required,
+      options: q.option_texts ? q.option_texts.split(',') : []
+    }));
 
-      // Handle choice-based questions
-      if (['multiple_choice', 'checkbox', 'dropdown'].includes(q.type)) {
-        const [optionCounts] = await db.query(
-          `SELECT o.option_text,
-                  COUNT(CASE WHEN a.answer_text = o.option_text THEN 1 END) AS count
-           FROM question_options o
-           LEFT JOIN answers a ON a.question_id = o.question_id
-           WHERE o.question_id = ?
-           GROUP BY o.option_text`,
-          [q.id]
-        );
-        questionData.options = optionCounts;
-      }
-
-      // Handle rating-type questions
-      if (q.type === 'rating') {
-        const [[{ avg_rating }]] = await db.query(
-          `SELECT AVG(CAST(answer_text AS DECIMAL)) AS avg_rating
-           FROM answers WHERE question_id = ?`,
-          [q.id]
-        );
-        questionData.average_rating = avg_rating
-          ? parseFloat(avg_rating).toFixed(2)
-          : "0.00";
-      }
-
-      analytics.push(questionData);
-    }
+    // Step 7: Format responses with answers
+    const formattedResponses = responses.map(r => ({
+      id: r.id,
+      surveyId: survey.id,
+      submittedAt: r.submitted_at,
+      answers: answers
+        .filter(a => a.response_id === r.id)
+        .reduce((acc, curr) => {
+          const question = questions.find(q => q.id === curr.question_id);
+          acc[curr.question_id] = formatAnswer(curr.answer_text, question.type);
+          return acc;
+        }, {})
+    }));
 
     // Final response
     res.json({
-      surveyId,
-      totalResponses,
-      questions: analytics
+      id: survey.id,
+      title: survey.title,
+      description: survey.description,
+      createdAt: survey.created_at,
+      questions: formattedQuestions,
+      responses: formattedResponses
     });
 
   } catch (err) {
@@ -89,5 +97,32 @@ const getSurveyAnalytics = async (req, res) => {
     res.status(500).json({ message: 'Server error generating analytics' });
   }
 };
+
+// Helper function to map database question types to frontend types
+function mapQuestionType(dbType) {
+  const typeMap = {
+    'multiple_choice': 'radio',
+    'checkbox': 'checkbox',
+    'dropdown': 'dropdown',
+    'rating_scale': 'rating',
+    'short_answer': 'text',
+    'long_answer': 'textarea'
+  };
+  return typeMap[dbType] || dbType;
+}
+
+// Helper function to format answers based on question type
+function formatAnswer(answer, questionType) {
+  if (!answer) return null;
+  
+  switch (questionType) {
+    case 'checkbox':
+      return answer.split(',');
+    case 'rating_scale':
+      return answer.toString();
+    default:
+      return answer;
+  }
+}
 
 module.exports = { getSurveyAnalytics };

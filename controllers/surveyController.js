@@ -81,24 +81,34 @@ const updateSurvey = async (req, res) => {
   };
 
   const getSurveysByUser = async (req, res) => {
-    const userId = req.params.id;
+  const userId = req.params.id;
 
-    if (req.user.id !== parseInt(userId) && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Unauthorized access to surveys' });
-    }
-  
-    try {
-      const [surveys] = await db.query(
-        `SELECT * FROM surveys WHERE user_id = ? ORDER BY created_at DESC`,
-        [userId]
-      );
-  
-      res.status(200).json(surveys);
-    } catch (err) {
-      console.error('Error fetching surveys by user:', err.message);
-      res.status(500).json({ message: 'Server error fetching surveys' });
-    }
-  };
+  if (req.user.id !== parseInt(userId) && req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Unauthorized access to surveys' });
+  }
+
+  try {
+    const [surveys] = await db.query(
+      `
+      SELECT 
+        s.*, 
+        COUNT(r.id) AS responses 
+      FROM surveys s
+      LEFT JOIN responses r ON s.id = r.survey_id
+      WHERE s.user_id = ?
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+      `,
+      [userId]
+    );
+
+    res.status(200).json(surveys);
+  } catch (err) {
+    console.error('Error fetching surveys by user:', err.message);
+    res.status(500).json({ message: 'Server error fetching surveys' });
+  }
+};
+
 
   const getSurveyById = async (req, res) => {
     const surveyId = req.params.id;
