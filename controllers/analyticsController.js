@@ -37,7 +37,7 @@ const getSurveyAnalytics = async (req, res) => {
     const [questions] = await db.query(
       `SELECT 
         q.id, 
-        q.question_text as text, 
+        q.question_text, 
         q.type, 
         q.is_required as required,
         GROUP_CONCAT(o.option_text) as option_texts
@@ -62,7 +62,7 @@ const getSurveyAnalytics = async (req, res) => {
     // Step 6: Format questions with options
     const formattedQuestions = questions.map(q => ({
       id: q.id,
-      text: q.question_text,
+      question: q.question_text,
       type: mapQuestionType(q.type), // Map to frontend types
       required: q.required,
       options: q.option_texts ? q.option_texts.split(',') : []
@@ -101,12 +101,14 @@ const getSurveyAnalytics = async (req, res) => {
 // Helper function to map database question types to frontend types
 function mapQuestionType(dbType) {
   const typeMap = {
-    'multiple_choice': 'radio',
+    'short_text': 'short_text',
+    'long_text': 'long_text',
+    'multiple_choice': 'multiple_choice',
     'checkbox': 'checkbox',
     'dropdown': 'dropdown',
-    'rating_scale': 'rating',
-    'short_answer': 'text',
-    'long_answer': 'textarea'
+    'rating': 'rating',
+    'scale': 'scale',
+    'matrix': 'matrix'
   };
   return typeMap[dbType] || dbType;
 }
@@ -118,7 +120,7 @@ function formatAnswer(answer, questionType) {
   switch (questionType) {
     case 'checkbox':
       return answer.split(',');
-    case 'rating_scale':
+    case 'rating':
       return answer.toString();
     default:
       return answer;

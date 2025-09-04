@@ -1,8 +1,22 @@
 const { saveResponse, saveAnswers, getSurveyResponses  } = require('../models/responseModel');
+const db = require('../config/db');
 
 const handleSubmitResponse = async (req, res) => {
     const survey_id = req.params.surveyId;
-    const user = req.user || null; // set if user is authenticated
+    
+    // Check for optional authentication
+    const authHeader = req.headers['authorization'];
+    let user = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+            const jwt = require('jsonwebtoken');
+            const token = authHeader.split(' ')[1];
+            user = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            // Invalid token, proceed as anonymous
+        }
+    }
+    
     const { respondent_email, answers } = req.body;
 
     // Basic validation

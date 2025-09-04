@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { handleSubmitResponse, handleGetSurveyResponses, deleteResponse  } = require('../controllers/responseController');
 const {authenticateToken, checkSurveyOwnership } = require('../middleware/authMiddleware');
+const db = require('../config/db');
 
 // Optional Auth Middleware
 const optionalAuth = (req, res, next) => {
@@ -17,7 +18,7 @@ const optionalAuth = (req, res, next) => {
 };
 
 // POST /api/responses/:surveyId — Accepts both anonymous and logged-in users
-router.post('/:surveyId', authenticateToken,checkSurveyOwnership, handleSubmitResponse);
+router.post('/:surveyId', handleSubmitResponse);
 
 router.get('/:surveyId',authenticateToken,checkSurveyOwnership, handleGetSurveyResponses);
 

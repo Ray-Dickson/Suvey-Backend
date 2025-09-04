@@ -47,20 +47,100 @@ const db = require('../config/db');
 
 const updateSurvey = async (req, res) => {
     const surveyId = req.params.id;
-    const { title, description, is_public, allow_multiple_submissions, requires_login, access_password, open_at, close_at, status } = req.body;
+    const { 
+        title, 
+        description, 
+        is_public, 
+        allow_multiple_submissions, 
+        requires_login, 
+        access_password, 
+        open_at, 
+        close_at, 
+        status,
+        questions = [] // Array of questions to update
+    } = req.body;
+
+    console.log('Update survey request:', { 
+        surveyId, 
+        title, 
+        status, 
+        questionsCount: questions.length,
+        user: req.user?.id,
+        body: req.body
+    });
   
+    const connection = await db.getConnection();
     try {
-      await db.query(
-        `UPDATE surveys SET title = ?, description = ?, is_public = ?, allow_multiple_submissions = ?, requires_login = ?, access_password = ?, open_at = ?, close_at = ?, status = ? WHERE id = ?`,
-        [title, description, is_public, allow_multiple_submissions, requires_login, access_password, open_at, close_at, status, surveyId]
-      );
-  
-      res.status(200).json({ message: 'Survey updated successfully' });
+        await connection.beginTransaction();
+
+        // 1. Update survey metadata
+        await connection.query(
+            `UPDATE surveys SET title = ?, description = ?, is_public = ?, allow_multiple_submissions = ?, requires_login = ?, access_password = ?, open_at = ?, close_at = ?, status = ?, last_edited = CURRENT_TIMESTAMP WHERE id = ?`,
+            [title, description, is_public, allow_multiple_submissions, requires_login, access_password, open_at, close_at, status, surveyId]
+        );
+
+        // 2. If questions are provided, update them
+        if (questions && questions.length > 0) {
+            // Delete existing questions and options
+            await connection.query(`DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE survey_id = ?)`, [surveyId]);
+            await connection.query(`DELETE FROM questions WHERE survey_id = ?`, [surveyId]);
+
+            // Insert updated questions
+            for (const [index, question] of questions.entries()) {
+                const {
+                    question_text,
+                    type,
+                    is_required = true,
+                    options = []
+                } = question;
+
+                // Debug logging
+                console.log('Updating question:', { question_text, type, is_required, options });
+
+                // Validate question type
+                const validTypes = ['short_text', 'long_text', 'multiple_choice', 'checkbox', 'dropdown', 'rating', 'scale', 'matrix'];
+                if (!validTypes.includes(type)) {
+                    throw new Error(`Invalid question type: ${type}. Valid types are: ${validTypes.join(', ')}`);
+                }
+
+                const [questionResult] = await connection.query(
+                    `INSERT INTO questions (survey_id, question_text, type, is_required, display_order)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [surveyId, question_text, type, is_required, index + 1]
+                );
+
+                const questionId = questionResult.insertId;
+
+                // Insert options for questions that need them
+                if (['multiple_choice', 'checkbox', 'dropdown'].includes(type)) {
+                    for (let i = 0; i < options.length; i++) {
+                        const optionText = options[i];
+                        await connection.query(
+                            `INSERT INTO question_options (question_id, option_text, display_order)
+                             VALUES (?, ?, ?)`,
+                            [questionId, optionText, i + 1]
+                        );
+                    }
+                }
+            }
+        }
+
+        await connection.commit();
+        console.log('Survey updated successfully:', surveyId);
+        res.status(200).json({ message: 'Survey updated successfully' });
     } catch (err) {
-      console.error(err.message);
-      res.status(500).json({ message: 'Error updating survey' });
+        await connection.rollback();
+        console.error('Error updating survey:', err.message);
+        console.error('Full error:', err);
+        res.status(500).json({ 
+            message: 'Error updating survey', 
+            error: err.message,
+            details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        });
+    } finally {
+        connection.release();
     }
-  };
+};
   
   const deleteSurvey = async (req, res) => {
     const surveyId = req.params.id;
@@ -198,6 +278,15 @@ const handleCreateSurveyWithQuestions = async (req, res) => {
                 is_required = true,
                 options = []
             } = question;
+
+            // Debug logging
+            console.log('Processing question:', { question_text, type, is_required, options });
+
+            // Validate question type
+            const validTypes = ['short_text', 'long_text', 'multiple_choice', 'checkbox', 'dropdown', 'rating', 'scale', 'matrix'];
+            if (!validTypes.includes(type)) {
+                throw new Error(`Invalid question type: ${type}. Valid types are: ${validTypes.join(', ')}`);
+            }
 
             const [questionResult] = await connection.query(
                 `INSERT INTO questions (survey_id, question_text, type, is_required, display_order)
