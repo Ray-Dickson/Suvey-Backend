@@ -10,6 +10,15 @@ const handleAddQuestion = async (req, res) => {
     }
 
     try {
+        // Only allow adding questions when survey is in draft
+        const [rows] = await db.query(`SELECT status FROM surveys WHERE id = ?`, [survey_id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Survey not found' });
+        }
+        if ((rows[0].status || '').toLowerCase() !== 'draft') {
+            return res.status(403).json({ message: 'Published surveys cannot be modified' });
+        }
+
         const questionId = await addQuestion(survey_id, questionData);
         res.status(201).json({
             message: 'Question added successfully',
@@ -43,6 +52,20 @@ const updateQuestion = async (req, res) => {
     await conn.beginTransaction();
   
     try {
+      // Enforce survey status draft for question updates
+      const [surveyRows] = await conn.query(
+        `SELECT s.status FROM surveys s INNER JOIN questions q ON q.survey_id = s.id WHERE q.id = ?`,
+        [questionId]
+      );
+      if (surveyRows.length === 0) {
+        await conn.rollback();
+        return res.status(404).json({ message: 'Question not found' });
+      }
+      if ((surveyRows[0].status || '').toLowerCase() !== 'draft') {
+        await conn.rollback();
+        return res.status(403).json({ message: 'Published surveys cannot be modified' });
+      }
+
       // 1. Update the question fields
       await conn.query(
         `UPDATE questions SET question_text = ?, type = ?, is_required = ?, display_order = ? WHERE id = ?`,
@@ -83,6 +106,18 @@ const updateQuestion = async (req, res) => {
     const questionId = req.params.id;
   
     try {
+      // Enforce survey status draft for deletions
+      const [surveyRows] = await db.query(
+        `SELECT s.status FROM surveys s INNER JOIN questions q ON q.survey_id = s.id WHERE q.id = ?`,
+        [questionId]
+      );
+      if (surveyRows.length === 0) {
+        return res.status(404).json({ message: 'Question not found' });
+      }
+      if ((surveyRows[0].status || '').toLowerCase() !== 'draft') {
+        return res.status(403).json({ message: 'Published surveys cannot be modified' });
+      }
+
       await db.query(`DELETE FROM question_options WHERE question_id = ?`, [questionId]);
       await db.query(`DELETE FROM questions WHERE id = ?`, [questionId]);
       res.status(200).json({ message: 'Question and options deleted successfully' });

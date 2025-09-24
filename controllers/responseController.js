@@ -25,6 +25,16 @@ const handleSubmitResponse = async (req, res) => {
     }
 
     try {
+        // Ensure survey exists and is published before accepting responses
+        const [surveyRows] = await db.query(`SELECT status FROM surveys WHERE id = ?`, [survey_id]);
+        if (surveyRows.length === 0) {
+            return res.status(404).json({ message: 'Survey not found' });
+        }
+        const status = (surveyRows[0].status || '').toLowerCase();
+        if (status !== 'published') {
+            return res.status(403).json({ message: 'Survey is not accepting responses' });
+        }
+
         // Save the main response entry
         const response_id = await saveResponse({
             survey_id,

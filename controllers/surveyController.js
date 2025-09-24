@@ -73,53 +73,84 @@ const updateSurvey = async (req, res) => {
     try {
         await connection.beginTransaction();
 
+        // Enforce: Only surveys in draft status can be edited/updated
+        const [statusRows] = await connection.query(
+            `SELECT status FROM surveys WHERE id = ?`,
+            [surveyId]
+        );
+        if (statusRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: 'Survey not found' });
+        }
+        const currentStatus = (statusRows[0].status || '').toLowerCase();
+        if (currentStatus !== 'draft') {
+            await connection.rollback();
+            return res.status(403).json({ message: 'Published surveys cannot be edited' });
+        }
+
         // 1. Update survey metadata
         await connection.query(
             `UPDATE surveys SET title = ?, description = ?, is_public = ?, allow_multiple_submissions = ?, requires_login = ?, access_password = ?, open_at = ?, close_at = ?, status = ?, last_edited = CURRENT_TIMESTAMP WHERE id = ?`,
             [title, description, is_public, allow_multiple_submissions, requires_login, access_password, open_at, close_at, status, surveyId]
         );
 
-        // 2. If questions are provided, update them
+        // 2. If questions are provided, update them (only if there are no responses)
         if (questions && questions.length > 0) {
-            // Delete existing questions and options
-            await connection.query(`DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE survey_id = ?)`, [surveyId]);
-            await connection.query(`DELETE FROM questions WHERE survey_id = ?`, [surveyId]);
+            // Check if the survey already has responses/answers
+            const [answerRows] = await connection.query(
+                `SELECT COUNT(*) AS answerCount
+                 FROM answers a
+                 INNER JOIN responses r ON r.id = a.response_id
+                 WHERE r.survey_id = ?`,
+                [surveyId]
+            );
+            const answerCount = answerRows[0]?.answerCount || 0;
 
-            // Insert updated questions
-            for (const [index, question] of questions.entries()) {
-                const {
-                    question_text,
-                    type,
-                    is_required = true,
-                    options = []
-                } = question;
+            if (answerCount > 0) {
+                // Do not modify questions if there are existing answers to preserve data integrity
+                console.log(`Survey ${surveyId} has ${answerCount} answers. Skipping question updates to avoid deleting referenced rows.`);
+            } else {
+                // Safe to replace questions/options when there are no responses
+                // Delete existing questions and options
+                await connection.query(`DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE survey_id = ?)`, [surveyId]);
+                await connection.query(`DELETE FROM questions WHERE survey_id = ?`, [surveyId]);
 
-                // Debug logging
-                console.log('Updating question:', { question_text, type, is_required, options });
+                // Insert updated questions
+                for (const [index, question] of questions.entries()) {
+                    const {
+                        question_text,
+                        type,
+                        is_required = true,
+                        options = []
+                    } = question;
 
-                // Validate question type
-                const validTypes = ['short_text', 'long_text', 'multiple_choice', 'checkbox', 'dropdown', 'rating', 'scale', 'matrix'];
-                if (!validTypes.includes(type)) {
-                    throw new Error(`Invalid question type: ${type}. Valid types are: ${validTypes.join(', ')}`);
-                }
+                    // Debug logging
+                    console.log('Updating question:', { question_text, type, is_required, options });
 
-                const [questionResult] = await connection.query(
-                    `INSERT INTO questions (survey_id, question_text, type, is_required, display_order)
-                     VALUES (?, ?, ?, ?, ?)`,
-                    [surveyId, question_text, type, is_required, index + 1]
-                );
+                    // Validate question type
+                    const validTypes = ['short_text', 'long_text', 'multiple_choice', 'checkbox', 'dropdown', 'rating', 'scale', 'matrix'];
+                    if (!validTypes.includes(type)) {
+                        throw new Error(`Invalid question type: ${type}. Valid types are: ${validTypes.join(', ')}`);
+                    }
 
-                const questionId = questionResult.insertId;
+                    const [questionResult] = await connection.query(
+                        `INSERT INTO questions (survey_id, question_text, type, is_required, display_order)
+                         VALUES (?, ?, ?, ?, ?)`,
+                        [surveyId, question_text, type, is_required, index + 1]
+                    );
 
-                // Insert options for questions that need them
-                if (['multiple_choice', 'checkbox', 'dropdown'].includes(type)) {
-                    for (let i = 0; i < options.length; i++) {
-                        const optionText = options[i];
-                        await connection.query(
-                            `INSERT INTO question_options (question_id, option_text, display_order)
-                             VALUES (?, ?, ?)`,
-                            [questionId, optionText, i + 1]
-                        );
+                    const questionId = questionResult.insertId;
+
+                    // Insert options for questions that need them
+                    if (['multiple_choice', 'checkbox', 'dropdown'].includes(type)) {
+                        for (let i = 0; i < options.length; i++) {
+                            const optionText = options[i];
+                            await connection.query(
+                                `INSERT INTO question_options (question_id, option_text, display_order)
+                                 VALUES (?, ?, ?)`,
+                                [questionId, optionText, i + 1]
+                            );
+                        }
                     }
                 }
             }
