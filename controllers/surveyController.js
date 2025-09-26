@@ -356,11 +356,88 @@ const handleCreateSurveyWithQuestions = async (req, res) => {
 
   
 
+// Admin function to get all surveys with user details
+const getAllSurveysForAdmin = async (req, res) => {
+  try {
+    const [surveys] = await db.query(
+      `
+      SELECT 
+        s.*,
+        u.name as creator_name,
+        u.email as creator_email,
+        u.phone_number as creator_phone,
+        u.role as creator_role,
+        COUNT(r.id) AS response_count
+      FROM surveys s
+      LEFT JOIN users u ON s.user_id = u.id
+      LEFT JOIN responses r ON s.id = r.survey_id
+      GROUP BY s.id, u.id
+      ORDER BY s.created_at DESC
+      `
+    );
+
+    res.status(200).json(surveys);
+  } catch (err) {
+    console.error('Error fetching all surveys for admin:', err.message);
+    res.status(500).json({ message: 'Server error fetching surveys' });
+  }
+};
+
+// Admin function to get all users
+const getAllUsersForAdmin = async (req, res) => {
+  try {
+    const [users] = await db.query(
+      `
+      SELECT 
+        u.id,
+        u.name,
+        u.email,
+        u.phone_number,
+        u.role,
+        u.created_at,
+        COUNT(s.id) as survey_count,
+        COUNT(r.id) as response_count
+      FROM users u
+      LEFT JOIN surveys s ON u.id = s.user_id
+      LEFT JOIN responses r ON u.id = r.user_id
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
+      `
+    );
+
+    res.status(200).json(users);
+  } catch (err) {
+    console.error('Error fetching all users for admin:', err.message);
+    res.status(500).json({ message: 'Server error fetching users' });
+  }
+};
+
+// Admin function to get system statistics
+const getSystemStats = async (req, res) => {
+  try {
+    const [userStats] = await db.query('SELECT COUNT(*) as total_users, COUNT(CASE WHEN role = "admin" THEN 1 END) as admin_count, COUNT(CASE WHEN role = "creator" THEN 1 END) as creator_count FROM users');
+    const [surveyStats] = await db.query('SELECT COUNT(*) as total_surveys, COUNT(CASE WHEN status = "published" THEN 1 END) as published_surveys, COUNT(CASE WHEN status = "draft" THEN 1 END) as draft_surveys FROM surveys');
+    const [responseStats] = await db.query('SELECT COUNT(*) as total_responses FROM responses');
+    
+    res.status(200).json({
+      users: userStats[0],
+      surveys: surveyStats[0],
+      responses: responseStats[0]
+    });
+  } catch (err) {
+    console.error('Error fetching system stats:', err.message);
+    res.status(500).json({ message: 'Server error fetching system statistics' });
+  }
+};
+
 module.exports = {
     handleCreateSurveyWithQuestions,
    // handleCreateSurvey,
     updateSurvey,
     deleteSurvey,
     getSurveysByUser,
-    getSurveyById
+    getSurveyById,
+    getAllSurveysForAdmin,
+    getAllUsersForAdmin,
+    getSystemStats
   };

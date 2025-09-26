@@ -9,6 +9,7 @@ const questionRoutes = require('./routes/questionRoutes');
 const responseRoutes = require('./routes/responseRoutes');
 const userRoutes = require('./routes/userRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const verifyToken = require('./routes/verifyToken');
 
 // Load env variables
@@ -24,6 +25,7 @@ app.use('/api/questions', questionRoutes);
 app.use('/api/responses', responseRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/verify', verifyToken);
 
 
