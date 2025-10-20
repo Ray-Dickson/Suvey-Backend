@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const validator = require('validator');
 const { findUserByEmail, findUserByPhone, createUser } = require('../models/userModel');
 
 const register = async (req, res) => {
@@ -7,6 +8,23 @@ const register = async (req, res) => {
   
     if (!name || !phone || !email || !password) {
       return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Enhanced validation
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    if (!validator.isLength(password, { min: 6 })) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    if (!validator.isLength(name, { min: 2, max: 50 })) {
+      return res.status(400).json({ message: 'Name must be between 2 and 50 characters' });
+    }
+
+    if (!validator.isMobilePhone(phone)) {
+      return res.status(400).json({ message: 'Invalid phone number format' });
     }
   
     try {
@@ -51,6 +69,11 @@ const login = async (req, res) => {
 
     if (!email || !password)
         return res.status(400).json({ message: 'Email and password are required' });
+
+    // Enhanced validation
+    if (!validator.isEmail(email)) {
+        return res.status(400).json({ message: 'Invalid email format' });
+    }
 
     try {
         const user = await findUserByEmail(email);
